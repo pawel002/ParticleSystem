@@ -47,12 +47,13 @@ public:
 	// imgui variables / objects
 	int frames;
 	float wireframeColor[3] = { 0.7, 0.7, 0.7 };
-	float color1[3] = { 1.0, 0.0, 0.0 };
-	float color2[3] = { 0.0, 1.0, 0.0 };
-	float color3[3] = { 0.0, 0.0, 1.0 };
-	float color4[3] = { 0.0, 1.0, 1.0 };
-	float color5[3] = { 1.0, 0.0, 1.0 };
-	float color6[3] = { 1.0, 1.0, 0.0 };
+	float color[3 * 6] =
+	{ 1.0, 0.0, 0.0,
+	  0.0, 1.0, 0.0,
+	  0.0, 0.0, 1.0,
+	  0.0, 1.0, 1.0,
+	  1.0, 0.0, 1.0,
+	  1.0, 1.0, 0.0 };
 
 
 	// pointers to data stored on cpu

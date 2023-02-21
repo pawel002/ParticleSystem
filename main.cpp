@@ -55,6 +55,7 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn){
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset){
 
+    ImGui_ImplGlfw_ScrollCallback(window, xoffset, yoffset);
     particleSim.camera.ProcessMouseScroll(static_cast<float>(yoffset));
 }
 
@@ -69,3 +70,4 @@ int main() {
 	particleSim.mainLoop();
 
 }
+

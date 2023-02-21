@@ -255,6 +255,8 @@ struct ImVec2
     float                                   x, y;
     constexpr ImVec2()                      : x(0.0f), y(0.0f) { }
     constexpr ImVec2(float _x, float _y)    : x(_x), y(_y) { }
+    ImVec2 operator+(ImVec2& b) { return ImVec2(x + b[0], y + b[1]); }
+    ImVec2 operator-(ImVec2& b)  { return ImVec2(x - b[0], y - b[1]); }
     float  operator[] (size_t idx) const    { IM_ASSERT(idx == 0 || idx == 1); return (&x)[idx]; }  // We very rarely use this [] operator, the assert overhead is fine.
     float& operator[] (size_t idx)          { IM_ASSERT(idx == 0 || idx == 1); return (&x)[idx]; }  // We very rarely use this [] operator, the assert overhead is fine.
 #ifdef IM_VEC2_CLASS_EXTRA

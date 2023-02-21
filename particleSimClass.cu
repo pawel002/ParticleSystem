@@ -15,7 +15,6 @@
 #include <glm/gtc/random.hpp>
 
 #include <iostream>
-#include <iostream>
 #include <iomanip>
 #include <string>
 #include <map>
@@ -25,6 +24,8 @@
 #include <future>
 #include <chrono>
 #include <math.h>
+#include <format>
+#include <string_view>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -63,8 +64,8 @@ ParticleSim::ParticleSim(int width, int height) {
 	particleCount = 4000;
 	typeCount = 3;
 	dragCoef = 0.4f;
-	rmin = 0.1f;
-	rmax = 0.3f;
+	rmin = 0.05f;
+	rmax = 0.7f;
 
 	blockSize = 8;
 	linearBlockSize = 512;
@@ -141,20 +142,82 @@ int ParticleSim::initImGUI() {
 	return 1;
 }
 
+void addCenteredText(ImVec2 center, std::string text, ImDrawList* drawList) {
+
+	auto textSize = ImGui::CalcTextSize(text.c_str());
+	drawList->AddText(center - ImVec2(0.5f * textSize.x, 0.5f * textSize.y), ImColor(1.0f, 1.0f, 1.0f, 1.0f), text.c_str());
+}
+
 void ParticleSim::renderImGui(float fps) {
 
 	ImGui::Begin("Options");
+
+	ImDrawList* drawList = ImGui::GetWindowDrawList();
+	ImVec2 p = ImGui::GetCursorScreenPos();
+
 	ImGui::Text(("FPS " + std::to_string(fps)).c_str());
 
 	// color editors
 	ImGui::ColorEdit3("Wireframe Color", wireframeColor);
-	ImGui::ColorEdit3("Color1", color1);
-	ImGui::ColorEdit3("Color2", color2);
-	ImGui::ColorEdit3("Color3", color3);
-	ImGui::ColorEdit3("Color4", color4);
-	ImGui::ColorEdit3("Color5", color5);
-	ImGui::ColorEdit3("Color6", color6);
+	ImGui::ColorEdit3("Color1", &color[0]);
+	ImGui::ColorEdit3("Color2", &color[3]);
+	ImGui::ColorEdit3("Color3", &color[6]);
+	ImGui::ColorEdit3("Color4", &color[9]);
+	ImGui::ColorEdit3("Color5", &color[12]);
+	ImGui::ColorEdit3("Color6", &color[15]);
 
+	
+	ImVec2 windowPosition = ImGui::GetWindowPos();
+	ImVec2 windowSize = ImGui::GetWindowSize();
+	float w = std::min(windowSize.x / typeCount, 50.0f);
+
+	// draw color labels
+	for (int i = 0; i < typeCount; i++) {
+
+		drawList->AddRectFilled(ImVec2(i * w + 60.0, 220.0) + windowPosition,
+			ImVec2((i + 1) * w + 60, w + 220.0) + windowPosition,
+			ImColor(color[3 * i + 0], color[3 * i + 1], color[3 * i + 2], 1.0));
+
+		drawList->AddRectFilled(ImVec2(10, i * w + 270.0) + windowPosition,
+			ImVec2(60.0, (i + 1) * w + 270.0) + windowPosition,
+			ImColor(color[3 * i + 0], color[3 * i + 1], color[3 * i + 2], 1.0));
+	}
+
+	// create a attraction matrix 
+	for (int i = 0; i < typeCount; i++) {
+		for (int j = 0; j < typeCount; j++) {
+			float val = (attractionMatrix[i * typeCount + j] + 1.0f) / 2.0f;
+			ImVec2 upperLeft = ImVec2(i * w + 60.0, j * w + 270.0) + windowPosition;
+			ImVec2 lowerRight = ImVec2((i + 1) * w + 60, (j + 1) * w + 270.0) + windowPosition;
+
+			drawList->AddRectFilled(upperLeft, lowerRight, 
+				ImColor(std::min(std::max(1.0f - val, 0.0f), 1.0f) , std::min(std::max(val, 0.0f), 1.0f), 0.0, 1.0));
+
+			// handle scrolling
+			if (ImGui::IsMouseHoveringRect(upperLeft, lowerRight)) {
+				float scroll = ImGui::GetIO().MouseWheel / 10.0;
+				attractionMatrix[i * typeCount + j] += scroll;
+			}
+
+			std::stringstream stream;
+			stream << std::fixed << std::setprecision(2) << attractionMatrix[i * typeCount + j];
+			std::string s = stream.str();
+
+			addCenteredText(ImVec2((i + 0.5) * w + 60, (j + 0.5) * w + 270.0) + windowPosition, s, drawList);
+		}
+	}
+
+	if (ImGui::Button("Reset Attraction Matrix")) {
+		for (int i = 0; i < typeCount; i++) {
+			for (int j = 0; j < typeCount; j++) {
+				attractionMatrix[i * typeCount + j] = 0.0f;
+			}
+		}
+	}
+
+	if (ImGui::Button("Apply attraction Matrix")) {
+		cudaMemcpy(d_attractionMatrix, attractionMatrix, typeCount * typeCount * sizeof(float), cudaMemcpyHostToDevice);
+	}
 
 	ImGui::End();
 }
@@ -203,7 +266,7 @@ void ParticleSim::generateParticles() {
 	cudaGraphicsMapResources(1, &cudaGR, 0);
 	cudaGraphicsResourceGetMappedPointer((void**)&d_particlePositions, &size, cudaGR);
 
-	int gridSize = (int)ceil(particleCount / blockSize);
+	int gridSize = (int)ceil(particleCount / blockSize) + 1;
 	grid = dim3(gridSize, gridSize);
 	threads = dim3(blockSize, blockSize);
 }
@@ -216,8 +279,8 @@ void ParticleSim::mainLoop() {
 	shaderProgram._activate();
 	
 	// frames check
-	double lastTime = glfwGetTime(), timer = lastTime, lastFrame = lastTime;
-	double nowTime = 0;
+	float lastTime = glfwGetTime(), timer = lastTime, lastFrame = lastTime;
+	float nowTime = 0;
 	frames = 0;
 	float fps = 0;
 	
@@ -243,12 +306,12 @@ void ParticleSim::mainLoop() {
 		shaderProgram.setVec3("cameraEye", camera.Position);
 
 		shaderProgram.setVec3("wireframeColor", glm::vec3(wireframeColor[0], wireframeColor[1], wireframeColor[2]));
-		shaderProgram.setVec3("color1", glm::vec3(color1[0], color1[1], color1[2]));
-		shaderProgram.setVec3("color2", glm::vec3(color2[0], color2[1], color2[2]));
-		shaderProgram.setVec3("color3", glm::vec3(color3[0], color3[1], color3[2]));
-		shaderProgram.setVec3("color4", glm::vec3(color4[0], color4[1], color4[2]));
-		shaderProgram.setVec3("color5", glm::vec3(color5[0], color5[1], color5[2]));
-		shaderProgram.setVec3("color6", glm::vec3(color6[0], color6[1], color6[2]));
+		shaderProgram.setVec3("color1", glm::vec3(color[0], color[1], color[2]));
+		shaderProgram.setVec3("color2", glm::vec3(color[3], color[4], color[5]));
+		shaderProgram.setVec3("color3", glm::vec3(color[6], color[7], color[8]));
+		shaderProgram.setVec3("color4", glm::vec3(color[9], color[10], color[11]));
+		shaderProgram.setVec3("color5", glm::vec3(color[12], color[13], color[14]));
+		shaderProgram.setVec3("color6", glm::vec3(color[15], color[16], color[17]));
 
 
 		// clear
@@ -316,7 +379,7 @@ void ParticleSim::callDevice() {
 
 	int dim3blocksize = 8;
 
-	int linearGridSize = ceil(particleCount / linearBlockSize);
+	int linearGridSize = ceil(particleCount / linearBlockSize) + 1;
 
 	int d3s = ceil(partitionDimension / dim3blocksize);
 	dim3 dim3grid = dim3(d3s, d3s, d3s);

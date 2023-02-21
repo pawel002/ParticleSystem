@@ -83,19 +83,19 @@ void computeBounds(
 	if (x < -1 || x > 1) {
 
 		d_particleVelocities[i] *= -1.0f;
-		d_particlePositions[i] = x < 0 ? -0.999f : 0.999f;
+		d_particlePositions[i] = x < 0 ? -0.99f : 0.99f;
 	}
 
 	if (y < -1 || y > 1) {
 
 		d_particleVelocities[i + 1] *= -1.0f;
-		d_particlePositions[i + 1] = y < 0 ? -0.999f : 0.999f;
+		d_particlePositions[i + 1] = y < 0 ? -0.99f : 0.99f;
 	}
 
 	if (z < -1 || z > 1) {
 
 		d_particleVelocities[i + 2] *= -1.0f;
-		d_particlePositions[i + 2] = z < 0 ? -0.999f : 0.999f;
+		d_particlePositions[i + 2] = z < 0 ? -0.99f : 0.99f;
 	}
 	
 }
