@@ -50,6 +50,13 @@
 
 ParticleSim::ParticleSim(int width, int height) {
 
+	cudaDeviceProp prop;
+	cudaError_t error = cudaGetDeviceProperties(&prop, 0);
+	if (error != cudaSuccess) {
+		std::cerr << "cudaGetDeviceProperties() failed: " << cudaGetErrorString(error) << std::endl;
+	}
+	std::cout << "Device name: " << prop.name << std::endl;
+
 	this->width = width;
 	this->height = height;
 	firstMouse = true;
@@ -74,6 +81,12 @@ ParticleSim::ParticleSim(int width, int height) {
 
 	srand(100);
 	e2.seed(101);
+
+	newParticleCount = particleCount;
+	newTypeCount = typeCount;
+	newrmin = rmin;
+	newrmax = rmax;
+	newdragcoef = dragCoef;
 
 	setAttractionMatrix();
 }
@@ -154,32 +167,39 @@ void ParticleSim::renderImGui(float fps) {
 
 	ImDrawList* drawList = ImGui::GetWindowDrawList();
 	ImVec2 p = ImGui::GetCursorScreenPos();
+	float matrixYoffset = 270.0f + 25.0f * typeCount;
 
+	ImGui::Text("Press C to exit Setting");
 	ImGui::Text(("FPS " + std::to_string(fps)).c_str());
+
+	ImGui::InputInt("Number of particles", &newParticleCount, 100);
+	ImGui::InputInt("Number of particle types", &newTypeCount, 1);
+	ImGui::InputFloat("rmin", &newrmin, 0.05f);
+	ImGui::InputFloat("rmax", &newrmax, 0.05f);
+	ImGui::InputFloat("Drag coefficient", &newdragcoef, 0.05f);
 
 	// color editors
 	ImGui::ColorEdit3("Wireframe Color", wireframeColor);
-	ImGui::ColorEdit3("Color1", &color[0]);
-	ImGui::ColorEdit3("Color2", &color[3]);
-	ImGui::ColorEdit3("Color3", &color[6]);
-	ImGui::ColorEdit3("Color4", &color[9]);
-	ImGui::ColorEdit3("Color5", &color[12]);
-	ImGui::ColorEdit3("Color6", &color[15]);
-
+	if (typeCount >= 1) ImGui::ColorEdit3("Color1", &color[0]);
+	if (typeCount >= 2) ImGui::ColorEdit3("Color2", &color[3]);
+	if (typeCount >= 3) ImGui::ColorEdit3("Color3", &color[6]);
+	if (typeCount >= 4) ImGui::ColorEdit3("Color4", &color[9]);
+	if (typeCount >= 5) ImGui::ColorEdit3("Color5", &color[12]);
+	if (typeCount >= 6) ImGui::ColorEdit3("Color6", &color[15]);
 	
 	ImVec2 windowPosition = ImGui::GetWindowPos();
 	ImVec2 windowSize = ImGui::GetWindowSize();
-	float w = std::min(windowSize.x / typeCount, 50.0f);
+	float w = std::min(windowSize.x / (1.25f * typeCount), 50.0f);
 
 	// draw color labels
 	for (int i = 0; i < typeCount; i++) {
 
-		drawList->AddRectFilled(ImVec2(i * w + 60.0, 220.0) + windowPosition,
-			ImVec2((i + 1) * w + 60, w + 220.0) + windowPosition,
+		drawList->AddRectFilled(ImVec2(i * w + w + 10.0, matrixYoffset) + windowPosition,
+			ImVec2((i + 1) * w + w + 10.0, w + matrixYoffset) + windowPosition,
 			ImColor(color[3 * i + 0], color[3 * i + 1], color[3 * i + 2], 1.0));
 
-		drawList->AddRectFilled(ImVec2(10, i * w + 270.0) + windowPosition,
-			ImVec2(60.0, (i + 1) * w + 270.0) + windowPosition,
+		drawList->AddRectFilled(ImVec2(10, i * w + matrixYoffset + w) + windowPosition,
+			ImVec2(w + 10.0, (i + 1) * w + matrixYoffset + w) + windowPosition,
 			ImColor(color[3 * i + 0], color[3 * i + 1], color[3 * i + 2], 1.0));
 	}
 
@@ -187,8 +207,8 @@ void ParticleSim::renderImGui(float fps) {
 	for (int i = 0; i < typeCount; i++) {
 		for (int j = 0; j < typeCount; j++) {
 			float val = (attractionMatrix[i * typeCount + j] + 1.0f) / 2.0f;
-			ImVec2 upperLeft = ImVec2(i * w + 60.0, j * w + 270.0) + windowPosition;
-			ImVec2 lowerRight = ImVec2((i + 1) * w + 60, (j + 1) * w + 270.0) + windowPosition;
+			ImVec2 upperLeft = ImVec2(i * w + 10.0 + w, j * w + matrixYoffset + w) + windowPosition;
+			ImVec2 lowerRight = ImVec2((i + 1) * w + 10.0 + w, (j + 1) * w + matrixYoffset + w) + windowPosition;
 
 			drawList->AddRectFilled(upperLeft, lowerRight, 
 				ImColor(std::min(std::max(1.0f - val, 0.0f), 1.0f) , std::min(std::max(val, 0.0f), 1.0f), 0.0, 1.0));
@@ -203,7 +223,7 @@ void ParticleSim::renderImGui(float fps) {
 			stream << std::fixed << std::setprecision(2) << attractionMatrix[i * typeCount + j];
 			std::string s = stream.str();
 
-			addCenteredText(ImVec2((i + 0.5) * w + 60, (j + 0.5) * w + 270.0) + windowPosition, s, drawList);
+			addCenteredText(ImVec2((i + 0.5) * w + 10.0 + w, (j + 0.5) * w + matrixYoffset + w) + windowPosition, s, drawList);
 		}
 	}
 
@@ -215,10 +235,93 @@ void ParticleSim::renderImGui(float fps) {
 		}
 	}
 
-	if (ImGui::Button("Apply attraction Matrix")) {
-		cudaMemcpy(d_attractionMatrix, attractionMatrix, typeCount * typeCount * sizeof(float), cudaMemcpyHostToDevice);
-	}
+	if (ImGui::Button("Apply Changes")) {
 
+		std::uniform_real_distribution<> uniform(-0.99f, 0.99f);
+
+		// handle the change of the number of particles
+		if (newParticleCount != particleCount) {
+			
+
+
+		}
+
+		// handle change of the numer of types
+		if (newTypeCount != typeCount) {
+			
+			if (newTypeCount < typeCount) {
+
+				for (int i = 0; i < particleCount; i++) {
+
+					if (particleTypes[i] >= newTypeCount) {
+
+						particleTypes[i] = rand() % newTypeCount;
+					}
+				}
+			}
+
+			if (newTypeCount > typeCount) {
+
+				for (int i = 0; i < particleCount; i++) {
+
+					int newType = rand() % newTypeCount;
+
+					if (newType >= typeCount) {
+						particleTypes[i] = newType;
+					}
+				}
+			}
+
+			cudaMemcpy(d_particleTypes, particleTypes, particleCount * sizeof(int), cudaMemcpyHostToDevice);
+
+			float* newAttractionMatrix = (float*) calloc(newTypeCount * newTypeCount, sizeof(float));
+
+			for (int i = 0; i < newTypeCount; i++) {
+				for (int j = 0; j < newTypeCount; j++) {
+
+					if (i < typeCount && j < typeCount) {
+						newAttractionMatrix[i * newTypeCount + j] = attractionMatrix[i * typeCount + j];
+					}
+					else {
+						newAttractionMatrix[i * newTypeCount + j] = (float) uniform(e2);
+					}
+				}
+			}
+
+			typeCount = newTypeCount;
+			attractionMatrix = (float *) calloc(newTypeCount * newTypeCount, sizeof(float));
+			for (int i = 0; i < newTypeCount * newTypeCount; i++) attractionMatrix[i] = newAttractionMatrix[i];
+			free(newAttractionMatrix);
+
+			glBindBuffer(GL_ARRAY_BUFFER, typeBuffer);
+			glBufferData(GL_ARRAY_BUFFER, particleCount * sizeof(int), particleTypes, GL_STATIC_READ);
+		}
+
+		cudaFree(d_attractionMatrix);
+		cudaMalloc(&d_attractionMatrix, newTypeCount * newTypeCount * sizeof(float));
+		cudaMemcpy(d_attractionMatrix, attractionMatrix, newTypeCount * newTypeCount * sizeof(float), cudaMemcpyHostToDevice);
+
+		// handle change of the minimum radius
+		if (newrmin != rmin) {
+			rmin = newrmin;
+		}
+
+		// handle change of the maximum radius
+		if (newrmax != rmax) {
+			rmax = newrmax;
+		}
+
+		// handle change of the drag coefficent
+		if (newdragcoef != dragCoef) {
+			dragCoef = newdragcoef;
+		}
+
+		float constants[] = { dragCoef, rmin, rmax, particleCount };
+		cudaMemcpy(d_constants, constants, 4 * sizeof(float), cudaMemcpyHostToDevice);
+
+		std::cout << "Applied changes\n";
+	}
+	
 	ImGui::End();
 }
 
@@ -265,10 +368,6 @@ void ParticleSim::generateParticles() {
 
 	cudaGraphicsMapResources(1, &cudaGR, 0);
 	cudaGraphicsResourceGetMappedPointer((void**)&d_particlePositions, &size, cudaGR);
-
-	int gridSize = (int)ceil(particleCount / blockSize) + 1;
-	grid = dim3(gridSize, gridSize);
-	threads = dim3(blockSize, blockSize);
 }
 
 
@@ -286,7 +385,7 @@ void ParticleSim::mainLoop() {
 	
 
 	// camera
-	camera = Camera();
+	camera = Camera(glm::vec3(1.14115f, 1.08318f, 2.37937f));
 
 	while (!glfwWindowShouldClose(window)) {
 
@@ -380,6 +479,10 @@ void ParticleSim::callDevice() {
 	int dim3blocksize = 8;
 
 	int linearGridSize = ceil(particleCount / linearBlockSize) + 1;
+
+	int gridSize = (int)ceil(particleCount / blockSize) + 1;
+	grid = dim3(gridSize, gridSize);
+	threads = dim3(blockSize, blockSize);
 
 	int d3s = ceil(partitionDimension / dim3blocksize);
 	dim3 dim3grid = dim3(d3s, d3s, d3s);

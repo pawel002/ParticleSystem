@@ -54,7 +54,11 @@ public:
 	  0.0, 1.0, 1.0,
 	  1.0, 0.0, 1.0,
 	  1.0, 1.0, 0.0 };
-
+	int newParticleCount;
+	int newTypeCount;
+	float newrmin;
+	float newrmax;
+	float newdragcoef;
 
 	// pointers to data stored on cpu
 	int* particleTypes;
