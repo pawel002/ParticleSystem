@@ -169,7 +169,11 @@ void ParticleSim::renderImGui(float fps) {
 	ImVec2 p = ImGui::GetCursorScreenPos();
 	float matrixYoffset = 270.0f + 25.0f * typeCount;
 
-	ImGui::Text("Press C to exit Setting");
+	cudaDeviceProp prop;
+	cudaGetDeviceProperties(&prop, 0);
+	std::string propName(prop.name);
+
+	ImGui::Text(("Press C to exit Setting, RUNNIG ON DEVICE: " + propName).c_str());
 	ImGui::Text(("FPS " + std::to_string(fps)).c_str());
 
 	ImGui::InputInt("Number of particles", &newParticleCount, 100);
@@ -241,8 +245,79 @@ void ParticleSim::renderImGui(float fps) {
 
 		// handle the change of the number of particles
 		if (newParticleCount != particleCount) {
-			
 
+			// temp vectors
+			float* tempParticlePositions = (float*) malloc(3 * particleCount * sizeof(float));
+			float* tempParticleVelocities = (float*) malloc(3 * particleCount * sizeof(float));
+			int* tempParticleTypes = (int*) calloc(3 * particleCount, sizeof(int));
+			
+			// copy infarmation from device memory
+			cudaMemcpy(tempParticlePositions, d_particlePositions, 3 * particleCount * sizeof(float), cudaMemcpyDeviceToHost);
+			cudaMemcpy(tempParticleVelocities, d_particleVelocities, 3 * particleCount * sizeof(float), cudaMemcpyDeviceToHost);
+
+			memcpy(tempParticleTypes, particleTypes, particleCount * sizeof(int));
+
+			// create new area for memory
+			free(particlePositions);
+			free(particleVelocities);
+			free(particleTypes);
+
+			particlePositions = (float*) calloc(3 * newParticleCount, sizeof(float));
+			particleVelocities = (float*) calloc(3 * newParticleCount, sizeof(float));
+			particleTypes = (int*) calloc(3 * newParticleCount, sizeof(int));
+
+			memcpy(particlePositions, tempParticlePositions, 3 * std::min(newParticleCount, particleCount) * sizeof(float));
+			memcpy(particleVelocities, tempParticleVelocities, 3 * std::min(newParticleCount, particleCount) * sizeof(float));
+			memcpy(particleTypes, tempParticleTypes, std::min(newParticleCount, particleCount) * sizeof(int));
+
+			// free cuda objects
+			cudaFree(d_particleVelocities);
+			cudaFree(d_particleTypes);
+
+			// if newPC > currPC generate new positions/velocities/types
+			if (newParticleCount > particleCount) {
+
+				for (int i = 0; i < newParticleCount - particleCount; i++) {
+
+					particlePositions[3 * particleCount + 3 * i + 0] = (float) uniform(e2);
+					particlePositions[3 * particleCount + 3 * i + 1] = (float) uniform(e2);
+					particlePositions[3 * particleCount + 3 * i + 2] = (float) uniform(e2);
+
+					particleVelocities[3 * particleCount + 3 * i + 0] = 0.0f;
+					particleVelocities[3 * particleCount + 3 * i + 1] = 0.0f;
+					particleVelocities[3 * particleCount + 3 * i + 2] = 0.0f;
+
+					particleTypes[particleCount + i] = rand() % typeCount;
+
+				}
+			}
+
+			// allocate velocities and types - CUDA
+
+			cudaMalloc(&d_particleVelocities, 3 * newParticleCount * sizeof(float));
+			cudaMalloc(&d_particleTypes, newParticleCount * sizeof(int));
+
+			cudaMemcpy(d_particleVelocities, particleVelocities, 3 * newParticleCount * sizeof(float), cudaMemcpyHostToDevice);
+			cudaMemcpy(d_particleTypes, particleTypes, newParticleCount * sizeof(int), cudaMemcpyHostToDevice);
+
+			// allocate positions and types - openGL
+
+			glBindBuffer(GL_ARRAY_BUFFER, typeBuffer);
+			glBufferData(GL_ARRAY_BUFFER, newParticleCount * sizeof(int), particleTypes, GL_STATIC_READ);
+
+			glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+			glBufferData(GL_ARRAY_BUFFER, 3 * newParticleCount * sizeof(float), particlePositions, GL_DYNAMIC_DRAW);
+			cudaGraphicsGLRegisterBuffer(&cudaGR, vertexBuffer, 0);
+
+			cudaGraphicsMapResources(1, &cudaGR, 0);
+			cudaGraphicsResourceGetMappedPointer((void**)&d_particlePositions, &size, cudaGR);
+
+			// free temps
+			free(tempParticlePositions);
+			free(tempParticleVelocities);
+			free(tempParticleTypes);
+
+			particleCount = newParticleCount;
 
 		}
 
@@ -411,7 +486,6 @@ void ParticleSim::mainLoop() {
 		shaderProgram.setVec3("color4", glm::vec3(color[9], color[10], color[11]));
 		shaderProgram.setVec3("color5", glm::vec3(color[12], color[13], color[14]));
 		shaderProgram.setVec3("color6", glm::vec3(color[15], color[16], color[17]));
-
 
 		// clear
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

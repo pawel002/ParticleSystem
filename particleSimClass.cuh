@@ -62,7 +62,6 @@ public:
 
 	// pointers to data stored on cpu
 	int* particleTypes;
-	float* particleColors;
 	float* particlePositions;
 	float* particleVelocities;
 	float* attractionMatrix;
