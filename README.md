@@ -10,6 +10,10 @@ In future I plan on adding the more efficient space partition algorithm to the s
 
 Using the program is pretty straight forward, as everything is well described and user-friendly. By hovering over an attraction matrix and scrolling up/down, you can edit the forces between pairs of colors. When you change simulation parameters you can apply them by clicking "apply changes".  Below you can see a screenshot of a working simulation.
 
-![app](https://github.com/pawel002/ParticleSystem/blob/master/vid/particleSim.mp4?raw=true)
+
+
+https://user-images.githubusercontent.com/95650330/227720010-7190aab0-6df0-4c6a-9bea-653b1ef2f7b6.mp4
+
+
 
 By pressing C, the user can move around the simulation and by pressing ESC the GUI will pop up.
